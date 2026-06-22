@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Institutional Chart AI</title>
+  <link rel="stylesheet" href="/static/app.css?v=10" />
+</head>
+<body>
+  <div class="ambient">
+    <div class="orb orb-gold"></div>
+    <div class="orb orb-fairway"></div>
+    <div class="orb orb-salmon"></div>
+  </div>
+
+  <!-- Unlock -->
+  <div id="lock-screen" class="lock-screen">
+    <div class="glass lock-card">
+      <div class="brand">
+        <div class="brand-mark">IC</div>
+        <div>
+          <h1>Institutional Chart AI</h1>
+          <p class="subtitle">Institutional Charts · Binance Futures</p>
+        </div>
+      </div>
+      <p class="lock-hint">Enter your connector access code from <code>.env</code></p>
+      <div class="field">
+        <input id="token-input" type="password" placeholder="CONNECTOR_TOKEN" autocomplete="off" />
+        <button id="unlock-btn" class="btn btn-gold">Unlock Dashboard</button>
+      </div>
+      <p id="lock-error" class="error hidden"></p>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div id="app" class="app hidden">
+    <header class="topbar glass">
+      <div class="topbar-left">
+        <div class="brand-mark sm">IC</div>
+        <div>
+          <h2>Institutional Chart AI</h2>
+          <span id="account-badge" class="badge badge-live">LIVE</span>
+        </div>
+      </div>
+      <div class="topbar-center">
+        <span id="trade-mode-pill" class="pill">confirm mode</span>
+        <div class="countdown-box topbar-countdown">
+          <span class="countdown-label">Next decision</span>
+          <span id="decision-countdown" class="countdown-value">--:--</span>
+        </div>
+        <span id="sync-indicator" class="sync-dot" title="Live sync"></span>
+        <span id="last-sync" class="muted">—</span>
+      </div>
+      <div class="topbar-right">
+        <button id="settings-toggle" class="btn btn-ghost">Settings</button>
+        <button id="logout-btn" class="btn btn-ghost">Lock</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <!-- Stats -->
+      <section class="stats-grid">
+        <div class="glass stat-card">
+          <span class="stat-label">Wallet Balance</span>
+          <span id="stat-balance" class="stat-value">—</span>
+          <span class="stat-sub">USDT total</span>
+        </div>
+        <div class="glass stat-card">
+          <span class="stat-label">Unrealized PnL</span>
+          <span id="stat-upnl" class="stat-value">—</span>
+          <span class="stat-sub">open positions</span>
+        </div>
+        <div class="glass stat-card">
+          <span class="stat-label">Open Positions</span>
+          <span id="stat-positions" class="stat-value">—</span>
+          <span class="stat-sub">active contracts</span>
+        </div>
+      </section>
+
+      <div class="content-grid">
+        <section class="glass panel panel-feed">
+          <div class="panel-head">
+            <h3>AI Desk</h3>
+            <button type="button" id="clear-feed-btn" class="btn-ghost btn-sm">
+              Clear chat
+            </button>
+          </div>
+          <div id="ai-feed" class="chat-space">
+            <div class="chat-empty">Analysis messages appear here every 15 minutes.</div>
+          </div>
+        </section>
+
+        <!-- Positions + Orders (Binance-style) -->
+        <section class="glass panel panel-positions">
+          <div class="panel-head panel-head-tabs">
+            <div class="tabs">
+              <button type="button" class="tab active" data-tab="positions">
+                Positions <span id="pos-tab-count" class="tab-count">0</span>
+              </button>
+              <button type="button" class="tab" data-tab="orders">
+                Open Orders <span id="orders-tab-count" class="tab-count">0</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="tab-positions" class="tab-pane">
+            <div class="table-wrap">
+              <table class="positions-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Size</th>
+                    <th>Entry Price</th>
+                    <th>Mark Price</th>
+                    <th>Liq. Price</th>
+                    <th>Margin</th>
+                    <th>PNL (ROI %)</th>
+                    <th>TP/SL</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="positions-body">
+                  <tr><td colspan="9" class="empty">No open positions</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="tab-orders" class="tab-pane hidden">
+            <div class="table-wrap">
+              <table class="positions-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Type</th>
+                    <th>Side</th>
+                    <th>Trigger Price</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="orders-body">
+                  <tr><td colspan="5" class="empty">No open orders</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <!-- Risk -->
+        <section class="glass panel panel-risk">
+          <div class="panel-head">
+            <h3>Risk Guard</h3>
+          </div>
+          <div id="risk-grid" class="risk-grid"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <!-- Settings drawer -->
+  <div id="settings-drawer" class="drawer hidden">
+    <div class="drawer-backdrop" id="settings-backdrop"></div>
+    <aside class="glass drawer-panel">
+      <div class="drawer-head">
+        <h3>Settings</h3>
+        <button id="settings-close" class="btn btn-ghost">&times;</button>
+      </div>
+
+      <div class="settings-section">
+        <h4>Binance</h4>
+        <p class="muted">Keys are loaded from <code>.env</code> on the server.</p>
+        <div id="binance-status" class="status-row"></div>
+      </div>
+
+      <div class="settings-section">
+        <h4>Orchestrator</h4>
+        <p class="muted">Server-side LLM (trading-dashboard pattern). Prompt: <code>agents/trader_system.txt</code> + live snapshot each cycle.</p>
+        <div id="orchestrator-status" class="status-row"></div>
+        <p class="muted settings-hint">Konsole POSTs snapshot → <code>/api/ui/konsole/analyze</code> every 15m.</p>
+      </div>
+
+      <div class="settings-section">
+        <h4>AI Provider</h4>
+        <label>Provider</label>
+        <select id="ai-provider">
+          <option value="google">Google (Gemini)</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="openai">OpenAI</option>
+        </select>
+        <label>Model</label>
+        <input id="ai-model" type="text" placeholder="gemini-2.5-flash" />
+        <label>API Key</label>
+        <input id="ai-api-key" type="password" placeholder="Leave blank to keep existing" />
+        <button id="save-settings" class="btn btn-gold">Save AI Settings</button>
+      </div>
+
+      <div class="settings-section">
+        <h4>Trade Rules</h4>
+        <div id="limits-grid" class="limits-grid"></div>
+      </div>
+    </aside>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <script src="/static/app.js?v=13"></script>
+</body>
+</html>
