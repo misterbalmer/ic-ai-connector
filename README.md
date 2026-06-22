@@ -39,6 +39,35 @@ python scripts/test_orchestrator_dry_run.py
 python scripts/smoke_trade.py
 ```
 
+## Institutional Charts Konsole (optional)
+
+Pair with **Institutional Charts** so Konsole pushes a 15m snapshot into this connector automatically.
+
+**Requirements**
+
+- Valid IC license ([trial](https://institutionalcharts.com/trial/))
+- IC beta build with Konsole egress (not the Microsoft Store build yet)
+- This connector running on `127.0.0.1:8080` **before** you start IC Konsole
+
+**Setup (one time)**
+
+```powershell
+.\scripts\setup-ic-egress.ps1
+```
+
+That script writes `%AppData%\InstitutionalCharts\connector.env` (from your `CONNECTOR_TOKEN`) and adds `127.0.0.1 ic.snapshot` to your hosts file (UAC prompt).
+
+**Then**
+
+1. `.\start.ps1` — connector must be up first
+2. Start IC Konsole → open Konsole grid
+3. On each **15m bar close**, IC POSTs to `http://ic.snapshot:8080/api/ui/konsole/analyze`
+4. Watch **AI Desk** at [http://127.0.0.1:8080/](http://127.0.0.1:8080/)
+
+If egress is silent after IC boot, restart IC Konsole once the connector is running (meta probe runs once per session).
+
+Beta MSI download: *link coming in GitHub Releases* (Step 10).
+
 ## Orchestrator (Konsole → LLM → trade)
 
 Static prompt in `agents/trader_system.txt`, live snapshot compiled server-side each cycle.
