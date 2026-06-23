@@ -20,7 +20,7 @@ try {
 
 $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$processId" -ErrorAction SilentlyContinue
 if ($proc) {
-    Write-Host "Stopping PID $processId: $($proc.CommandLine)"
+    Write-Host "Stopping PID ${processId}: $($proc.CommandLine)"
 }
 Stop-Process -Id $processId -Force
 Write-Host "Connector stopped."

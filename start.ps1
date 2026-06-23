@@ -3,6 +3,17 @@ $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
 $Port = 8080
+$venvPython = Join-Path $PSScriptRoot ".venv\Scripts\python.exe"
+
+function Find-Python {
+    $candidates = @("C:\Python314\python.exe", "C:\Python313\python.exe", "C:\Python312\python.exe")
+    foreach ($path in $candidates) {
+        if (Test-Path $path) { return $path }
+    }
+    $cmd = Get-Command python -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
 
 function Get-PortListenerPid {
     param([int]$ListenPort)
@@ -38,8 +49,14 @@ function Stop-StaleConnector {
     exit 1
 }
 
+if (-not (Test-Path $venvPython)) {
+    Write-Host "[..] First run — installing..."
+    & (Join-Path $PSScriptRoot "install.ps1")
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+
 if (-not (Test-Path ".env")) {
-    Write-Host "Missing .env - copy env.example to .env and fill in your keys."
+    Write-Host "[FAIL] Missing .env — run .\install.ps1"
     exit 1
 }
 
@@ -53,11 +70,5 @@ if ($listenerPid) {
     }
 }
 
-$python = "python"
-if (Test-Path "C:\Python314\python.exe") {
-    $python = "C:\Python314\python.exe"
-}
-
-& $python -m pip install -q -r requirements.txt
 Write-Host "Starting IC AI Connector - dashboard at http://127.0.0.1:$Port/"
-& $python run.py
+& $venvPython run.py
