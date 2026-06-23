@@ -10,12 +10,12 @@ AGENTS_DIR = Path(__file__).resolve().parent.parent / "agents"
 
 
 def load_trader_system_base() -> str:
-    path = AGENTS_DIR / "trader_system.txt"
+    path = AGENTS_DIR / "trader_system.md"
     if not path.exists():
         raise FileNotFoundError(f"Missing agent prompt: {path}")
     text = path.read_text(encoding="utf-8").strip()
     if not text:
-        raise ValueError("trader_system.txt is empty")
+        raise ValueError("trader_system.md is empty")
     return text
 
 
@@ -58,14 +58,14 @@ def build_ic_context_block(ic_context: dict[str, Any] | None) -> str:
     if not ic_context:
         return (
             "=== IC CONTEXT ===\n"
-            "(none — trade_engine S/R + 1H EMA200 not yet attached; "
+            "(none — trade_engine S/R not attached; "
             "use universe[] only; prefer watch/no_action over inventing levels)"
         )
     te = ic_context.get("trade_engine")
     header = "=== IC CONTEXT ===\n"
     if isinstance(te, dict) and te.get("symbols"):
         n = len(te["symbols"])
-        header += f"(trade_engine present — {n} symbol(s) with S/R + 1H EMA200)\n"
+        header += f"(trade_engine present — {n} symbol(s), sr only)\n"
     return header + json.dumps(ic_context, indent=2, default=str)
 
 
@@ -102,9 +102,11 @@ def user_message_for_cycle(snapshot_at: str | None = None) -> str:
     ts = snapshot_at or "now"
     return (
         f"Konsole decision cycle at {ts}. "
-        "Analyze KONSOLE SNAPSHOT (top-20 universe[]: P1→P2→P3→Watch, day_rvol within tier) and IC CONTEXT trade_engine S/R if present. "
-        "Run gates: participation → extension (check ma_stack_4h.bars_since_stack_aligned before energy_z) → S/R → acceptance → OI/structure. "
-        "Return coin_briefs only (no preamble, no summary): exactly one line per universe[] row in snapshot order (all 20 — include every P2, P3, Watch, untiered; never skip). "
-        "Line format: SYMBOL (tier): day_rvol, energy_trend, energy_phase, energy_z, structure_4h, structure_1w — verdict. "
-        "watchlist max 3 for detailed defers only. Return JSON only."
+        "Analyze KONSOLE SNAPSHOT (top-20 universe[]: P1→P2→P3→Watch, day_rvol within tier) and IC CONTEXT trade_engine sr if present. "
+        "Per coin, evaluate in order: (1) flow/participation → (2) trend structure → (3) momentum/exhaustion → (4) correlation; "
+        "cite each field only in its layer (check ma_stack_4h.bars_since_stack_aligned before energy_z). "
+        "Return coin_briefs only (no preamble, no summary): exactly one line per universe[] row in snapshot order (all 20 — include every P2, P3, Watch; never skip). "
+        "Rows matching open_positions: monitor line (hold/monitor) per position-management section — not layers 1–4. "
+        "Other rows: SYMBOL (tier): participation facts, structure facts, momentum facts, correlation facts — verdict. "
+        "No CONFIRMED_* labels, no invented entry_zone/ema_1h. watchlist max 3 for detailed defers only. Return JSON only."
     )

@@ -8,7 +8,7 @@ from typing import Any, Callable
 
 from connector.ai_feed import append_feed
 from connector.llm_client import LlmError, call_llm, default_model_for_provider, resolve_ai_model
-from connector.position_manager import apply_fifty_percent_rule, execute_position_action
+from connector.position_manager import execute_position_action
 from connector.orchestrator_state import load_state, record_run
 from connector.prompt_compiler import compile_trader_prompt, user_message_for_cycle
 from connector.trade_sizing import TradeSizingError, normalize_trade_size
@@ -128,7 +128,7 @@ class Orchestrator:
             ),
             "trade_mode": self.settings.trade_mode,
             "decision_interval_seconds": self.settings.decision_interval_seconds,
-            "agent_prompt": "agents/trader_system.txt",
+            "agent_prompt": "agents/trader_system.md",
             "last_run_at": state.get("last_run_at"),
             "last_status": state.get("last_status"),
             "last_action": state.get("last_action"),
@@ -169,17 +169,6 @@ class Orchestrator:
                 self.exchange_svc.cleanup_orphan_exit_algos(positions)
             except Exception as exc:
                 logger.warning("orphan exit cleanup failed: %s", exc)
-
-        auto_mgmt: list[dict[str, Any]] = []
-        if not dry_run:
-            auto_mgmt = apply_fifty_percent_rule(
-                exchange_svc=self.exchange_svc,
-                positions=positions,
-                state_path=position_state_path,
-                maybe_execute=self.maybe_queue_or_execute,
-            )
-            if auto_mgmt:
-                positions = self.exchange_svc.fetch_active_positions()
 
         system = compile_trader_prompt(
             settings=self.settings,
@@ -245,7 +234,7 @@ class Orchestrator:
 
             trade_results: list[dict[str, Any]] = []
             proposal_ids: list[str] = []
-            mgmt_results: list[dict[str, Any]] = list(auto_mgmt)
+            mgmt_results: list[dict[str, Any]] = []
 
             position_actions = parsed.get("position_actions") or []
             if isinstance(position_actions, list):
@@ -258,6 +247,7 @@ class Orchestrator:
                                 act,
                                 exchange_svc=self.exchange_svc,
                                 maybe_execute=self.maybe_queue_or_execute,
+                                state_path=position_state_path,
                             )
                         )
                     except Exception as exc:

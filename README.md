@@ -76,7 +76,7 @@ Open **http://127.0.0.1:8080/** → AI Desk. Add your **AI API key** in Settings
 2. Server compiles prompt + account state, calls LLM  
 3. `brief` → **AI Desk**; trades per `TRADE_MODE`
 
-Static rules: `agents/trader_system.txt`. Live data appended each cycle.
+Static rules: `agents/trader_system.md`. Live data appended each cycle.
 
 ---
 
