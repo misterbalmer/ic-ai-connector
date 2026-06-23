@@ -38,7 +38,7 @@ chmod +x install.sh start.sh stop.sh scripts/setup-ic-egress.sh
 ```
 
 Open **http://127.0.0.1:8080/** → AI Desk. Add your **AI API key** in Settings.
-
+<img width="1887" height="857" alt="Screenshot 2026-06-23 155556" src="https://github.com/user-attachments/assets/53b9a350-bac8-4c0c-aca0-6deb70ac0325" />
 `install.ps1` / `install.sh` will:
 
 1. Create an isolated `.venv` and install dependencies  
