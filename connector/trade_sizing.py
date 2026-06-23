@@ -52,6 +52,50 @@ def leverage_from_stop(
     return min(lev, max(1, max_leverage))
 
 
+def _amount_increment(exchange: Any, sym: str) -> float:
+    """Smallest quantity step for bumping size after precision rounding."""
+    market = exchange.market(sym)
+    limits = (market.get("limits") or {}).get("amount") or {}
+    step = limits.get("step")
+    if step is not None and float(step) > 0:
+        return float(step)
+    min_amt = limits.get("min")
+    if min_amt is not None and float(min_amt) > 0:
+        return float(min_amt)
+    prec = (market.get("precision") or {}).get("amount")
+    if prec is not None:
+        if isinstance(prec, int):
+            return 10.0 ** (-prec)
+        return float(prec)
+    return 1.0
+
+
+def _bump_amount_to_min_notional(
+    exchange: Any,
+    sym: str,
+    *,
+    amount: float,
+    entry: float,
+    min_notional: float,
+    max_notional: float,
+    symbol: str,
+) -> tuple[float, float]:
+    """Raise qty by one step until notional meets exchange minimum (within budget)."""
+    inc = _amount_increment(exchange, sym)
+    final = amount * entry
+    for _ in range(10_000):
+        if final >= min_notional:
+            return amount, final
+        amount = float(exchange.amount_to_precision(sym, amount + inc))
+        final = amount * entry
+        if final > max_notional:
+            raise TradeSizingError(
+                f"{symbol}: cannot reach min notional ${min_notional:.2f} "
+                f"within max ${max_notional:.2f} after precision rounding"
+            )
+    raise TradeSizingError(f"{symbol}: could not bump amount to min notional")
+
+
 def min_notional_for_symbol(exchange_svc: Any, symbol: str, fallback: float) -> float:
     try:
         from connector.exchange import normalize_symbol
@@ -133,9 +177,17 @@ def normalize_trade_size(
     sym = normalize_symbol(symbol)
     amount = notional / entry
     amount = float(exchange_svc.exchange.amount_to_precision(sym, amount))
-    final_notional = amount * entry
+    amount, final_notional = _bump_amount_to_min_notional(
+        exchange_svc.exchange,
+        sym,
+        amount=amount,
+        entry=entry,
+        min_notional=min_notional,
+        max_notional=max_notional,
+        symbol=symbol,
+    )
 
-    if final_notional < min_notional * 0.99:
+    if final_notional < min_notional:
         raise TradeSizingError(
             f"{symbol}: sized notional ${final_notional:.2f} below minimum ${min_notional:.2f}"
         )

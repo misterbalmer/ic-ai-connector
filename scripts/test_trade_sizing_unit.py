@@ -19,10 +19,16 @@ from connector.trade_sizing import (
 
 class FakeExchange:
     def market(self, sym):
-        return {"limits": {"cost": {"min": 5.0}}}
+        return {
+            "limits": {
+                "cost": {"min": 5.0},
+                "amount": {"min": 1.0, "step": 1.0},
+            },
+            "precision": {"amount": 0},
+        }
 
     def amount_to_precision(self, sym, amount):
-        return f"{float(amount):.3f}"
+        return str(int(float(amount)))
 
 
 class FakeExchangeSvc:
@@ -87,6 +93,25 @@ def test_normalize_rejects_tiny_balance():
         assert "minimum" in str(exc).lower() or "below" in str(exc).lower()
 
 
+def test_precision_rounding_bumps_to_min_notional():
+    """Integer qty step can round $5 target down to $4.95 — must bump to next step."""
+    trade = {
+        "symbol": "WUSDT",
+        "side": "buy",
+        "amount": 33.0,
+        "stop_loss": 0.14,
+    }
+    out = normalize_trade_size(
+        trade,
+        balance={"total": 100.0},
+        entry_price=0.15,
+        exchange_svc=FakeExchangeSvc(),
+        max_leverage=20,
+    )
+    assert out["amount"] * 0.15 >= 5.0
+    assert out["notional_usdt"] >= 5.0
+
+
 def test_missing_stop_rejected():
     try:
         normalize_trade_size(
@@ -108,5 +133,6 @@ if __name__ == "__main__":
     test_leverage_capped()
     test_normalize_bumps_to_min_notional()
     test_normalize_rejects_tiny_balance()
+    test_precision_rounding_bumps_to_min_notional()
     test_missing_stop_rejected()
     print("All trade sizing tests passed.")

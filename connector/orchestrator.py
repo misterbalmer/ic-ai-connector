@@ -8,10 +8,7 @@ from typing import Any, Callable
 
 from connector.ai_feed import append_feed
 from connector.llm_client import LlmError, call_llm, default_model_for_provider, resolve_ai_model
-from connector.position_manager import (
-    apply_fifty_percent_rule,
-    execute_position_action,
-)
+from connector.position_manager import apply_fifty_percent_rule, execute_position_action
 from connector.orchestrator_state import load_state, record_run
 from connector.prompt_compiler import compile_trader_prompt, user_message_for_cycle
 from connector.trade_sizing import TradeSizingError, normalize_trade_size
@@ -154,10 +151,24 @@ class Orchestrator:
                 encoding="utf-8",
             )
         ui = load_ui_settings()
-        balance = self.exchange_svc.fetch_balance_summary()
-        positions = self.exchange_svc.fetch_active_positions()
+        try:
+            balance = self.exchange_svc.fetch_balance_summary()
+        except Exception as exc:
+            logger.warning("balance fetch failed: %s", exc)
+            balance = {"total": 0, "free": 0, "used": 0}
+        try:
+            positions = self.exchange_svc.fetch_active_positions()
+        except Exception as exc:
+            logger.warning("positions fetch failed: %s", exc)
+            positions = []
         risk_status = self.risk.status()
         position_state_path = self.settings.root_dir / "position-state.json"
+
+        if not dry_run:
+            try:
+                self.exchange_svc.cleanup_orphan_exit_algos(positions)
+            except Exception as exc:
+                logger.warning("orphan exit cleanup failed: %s", exc)
 
         auto_mgmt: list[dict[str, Any]] = []
         if not dry_run:
@@ -288,7 +299,18 @@ class Orchestrator:
                     "notional_usdt": t.get("notional_usdt"),
                     "type": "market",
                 }
-                result = self.maybe_queue_or_execute("open", payload)
+                try:
+                    result = self.maybe_queue_or_execute("open", payload)
+                except Exception as exc:
+                    logger.warning("Trade execution failed for %s: %s", t.get("symbol"), exc)
+                    trade_results.append(
+                        {
+                            "status": "failed",
+                            "error": str(exc),
+                            "symbol": t.get("symbol"),
+                        }
+                    )
+                    continue
                 trade_results.append(result)
                 prop = result.get("proposal") or {}
                 if prop.get("proposal_id"):

@@ -31,15 +31,11 @@ def test_fifty_percent_rule_triggers_once():
 
         def maybe_execute(action: str, payload: dict):
             executed.append((action, payload))
-            return {"ok": True, "action": action}
-
-        class FakeExchange:
-            def move_stop_to_breakeven(self, **kwargs):
-                return {"breakeven": True, **kwargs}
+            return {"status": "executed", "action": action}
 
         positions = [{"symbol": "SAND/USDT:USDT", "side": "long", "entryPrice": 0.1, "percentage": 52}]
         results = apply_fifty_percent_rule(
-            exchange_svc=FakeExchange(),
+            exchange_svc=object(),
             positions=positions,
             state_path=state_path,
             maybe_execute=maybe_execute,
@@ -47,15 +43,16 @@ def test_fifty_percent_rule_triggers_once():
         assert len(results) == 1
         assert executed[0][0] == "partial_close"
         assert executed[0][1]["percentage"] == 50
+        assert executed[1][0] == "set_sl"
 
         results2 = apply_fifty_percent_rule(
-            exchange_svc=FakeExchange(),
+            exchange_svc=object(),
             positions=positions,
             state_path=state_path,
             maybe_execute=maybe_execute,
         )
         assert len(results2) == 0
-        assert len(executed) == 1
+        assert len(executed) == 2
         print("OK fifty_percent_rule")
 
 

@@ -83,11 +83,28 @@ def apply_fifty_percent_rule(
             {"symbol": symbol, "percentage": PARTIAL_CLOSE_PCT},
         )
         entry = float(pos.get("entryPrice") or 0)
-        breakeven = exchange_svc.move_stop_to_breakeven(
-            symbol=symbol,
-            close_side=_close_side(pos),
-            entry_price=entry,
+        breakeven = maybe_execute(
+            "set_sl",
+            {
+                "symbol": symbol,
+                "side": _close_side(pos),
+                "trigger_price": entry,
+                "close_position": True,
+                "cancel_existing_stops": True,
+            },
         )
+        if partial.get("status") != "executed" or breakeven.get("status") != "executed":
+            results.append(
+                {
+                    "symbol": symbol,
+                    "rule": "fifty_percent_partial_breakeven",
+                    "pnl_pct": pnl,
+                    "partial_close": partial,
+                    "breakeven": breakeven,
+                    "skipped_state": True,
+                }
+            )
+            continue
         sym_state["partial_50_taken"] = True
         sym_state["breakeven_sl_set"] = True
         sym_state["pnl_at_trigger"] = round(pnl, 2)

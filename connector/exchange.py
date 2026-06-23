@@ -32,6 +32,26 @@ def binance_raw_symbol(user_symbol: str) -> str:
     return s.replace("/", "").split(":")[0]
 
 
+_EXIT_SL_TYPES = frozenset({"STOP", "STOP_MARKET"})
+_EXIT_TP_TYPES = frozenset({"TAKE_PROFIT", "TAKE_PROFIT_MARKET"})
+
+
+def _position_contracts(position: dict[str, Any] | None) -> float:
+    if not position:
+        return 0.0
+    for key in ("contracts", "contractSize", "amount", "positionAmt"):
+        raw = position.get(key)
+        if raw is None:
+            continue
+        try:
+            size = abs(float(raw))
+        except (TypeError, ValueError):
+            continue
+        if size > 0:
+            return size
+    return 0.0
+
+
 def create_exchange(settings: Settings) -> ccxt.binance:
     exchange = ccxt.binance(
         {
@@ -217,11 +237,12 @@ class ExchangeService:
             "side": side.upper(),
             "type": "STOP_MARKET",
             "triggerPrice": trigger,
-            "reduceOnly": True,
         }
         if close_position and amount is None:
+            # Binance rejects reduceOnly together with closePosition (-1106).
             params["closePosition"] = True
         else:
+            params["reduceOnly"] = True
             qty = amount or 0
             params["quantity"] = self.exchange.amount_to_precision(sym, qty)
         try:
@@ -259,11 +280,11 @@ class ExchangeService:
             "side": side.upper(),
             "type": "TAKE_PROFIT_MARKET",
             "triggerPrice": trigger,
-            "reduceOnly": True,
         }
         if close_position and amount is None:
             params["closePosition"] = True
         else:
+            params["reduceOnly"] = True
             params["quantity"] = self.exchange.amount_to_precision(sym, amount or 0)
         try:
             return self.exchange.fapiPrivatePostAlgoOrder(params)
@@ -372,6 +393,7 @@ class ExchangeService:
                     amount=abs(float(p["contracts"])),
                     reduce_only=True,
                 )
+                self.cancel_exit_algos(sym, sl=True, tp=True)
                 closed.append({"symbol": sym, "order_id": order.get("id"), "side": close_side})
             except Exception as exc:
                 closed.append({"symbol": sym, "error": str(exc)})
@@ -412,13 +434,11 @@ class ExchangeService:
         tp: bool = True,
     ) -> list[str]:
         cancelled: list[str] = []
-        sl_types = {"STOP", "STOP_MARKET"}
-        tp_types = {"TAKE_PROFIT", "TAKE_PROFIT_MARKET"}
         for algo in self.fetch_algo_orders(symbol):
             otype = str(algo.get("orderType") or "")
-            if sl and otype in sl_types:
+            if sl and otype in _EXIT_SL_TYPES:
                 pass
-            elif tp and otype in tp_types:
+            elif tp and otype in _EXIT_TP_TYPES:
                 pass
             else:
                 continue
@@ -427,6 +447,39 @@ class ExchangeService:
                 self.cancel_algo_order(aid)
                 cancelled.append(str(aid))
         return cancelled
+
+    def cleanup_orphan_exit_algos(
+        self, positions: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
+        """Drop SL/TP conditional orders when there is no open position for that symbol."""
+        if positions is None:
+            positions = self.fetch_active_positions()
+        held: set[str] = set()
+        for pos in positions:
+            if _position_contracts(pos) <= 0:
+                continue
+            sym = str(pos.get("symbol") or "")
+            if sym:
+                held.add(binance_raw_symbol(sym))
+
+        removed: list[dict[str, Any]] = []
+        for algo in self.fetch_algo_orders():
+            raw_sym = str(algo.get("symbol") or "").upper()
+            otype = str(algo.get("orderType") or "")
+            if raw_sym in held:
+                continue
+            if otype not in _EXIT_SL_TYPES and otype not in _EXIT_TP_TYPES:
+                continue
+            aid = algo.get("algoId")
+            if aid is None:
+                continue
+            try:
+                self.cancel_algo_order(aid)
+                removed.append({"symbol": raw_sym, "algoId": aid, "orderType": otype})
+                logger.info("cancelled orphan exit %s %s on %s", otype, aid, raw_sym)
+            except Exception as exc:
+                logger.warning("orphan exit cancel failed %s on %s: %s", aid, raw_sym, exc)
+        return removed
 
     def cancel_stop_algos(self, symbol: str | None = None) -> list[str]:
         return self.cancel_exit_algos(symbol, sl=True, tp=False)
@@ -501,6 +554,17 @@ class ExchangeService:
         )
         return {"order": order}
 
+    def _emergency_close_entry(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Market-close an entry when protective orders fail."""
+        close_side = "sell" if payload["side"].lower() == "buy" else "buy"
+        return self.place_order(
+            symbol=payload["symbol"],
+            side=close_side,
+            order_type="market",
+            amount=float(payload["amount"]),
+            reduce_only=True,
+        )
+
     def _execute_open(self, payload: dict[str, Any]) -> dict[str, Any]:
         leverage = payload.get("leverage")
         if leverage:
@@ -515,34 +579,57 @@ class ExchangeService:
         )
         result: dict[str, Any] = {"entry": entry}
         close_side = "sell" if payload["side"].lower() == "buy" else "buy"
-        if payload.get("stop_loss"):
-            result["stop_loss"] = self.place_stop_loss(
-                symbol=payload["symbol"],
-                side=close_side,
-                trigger_price=float(payload["stop_loss"]),
+        try:
+            if payload.get("stop_loss"):
+                result["stop_loss"] = self.place_stop_loss(
+                    symbol=payload["symbol"],
+                    side=close_side,
+                    trigger_price=float(payload["stop_loss"]),
+                )
+            tp = payload.get("take_profit")
+            if tp is not None:
+                tp_type = str(payload.get("take_profit_type") or "limit").lower()
+                if tp_type == "limit":
+                    limit_px = payload.get("take_profit_limit_price") or tp
+                    tp_amount = payload.get("take_profit_amount") or float(payload["amount"])
+                    result["take_profit"] = self.place_take_profit_limit(
+                        symbol=payload["symbol"],
+                        side=close_side,
+                        trigger_price=float(tp),
+                        limit_price=float(limit_px),
+                        amount=float(tp_amount),
+                    )
+                else:
+                    result["take_profit"] = self.place_take_profit(
+                        symbol=payload["symbol"],
+                        side=close_side,
+                        trigger_price=float(tp),
+                        amount=payload.get("take_profit_amount"),
+                        close_position=payload.get("take_profit_close_position", True),
+                    )
+        except Exception as exc:
+            logger.error(
+                "Exit order failed after entry for %s: %s",
+                payload.get("symbol"),
+                exc,
             )
-        tp = payload.get("take_profit")
-        if tp is not None:
-            tp_type = str(payload.get("take_profit_type") or "limit").lower()
-            if tp_type == "limit":
-                limit_px = payload.get("take_profit_limit_price") or tp
-                tp_amount = payload.get("take_profit_amount") or float(payload["amount"])
-                result["take_profit"] = self.place_take_profit_limit(
-                    symbol=payload["symbol"],
-                    side=close_side,
-                    trigger_price=float(tp),
-                    limit_price=float(limit_px),
-                    amount=float(tp_amount),
-                )
-            else:
-                result["take_profit"] = self.place_take_profit(
-                    symbol=payload["symbol"],
-                    side=close_side,
-                    trigger_price=float(tp),
-                    amount=payload.get("take_profit_amount"),
-                    close_position=payload.get("take_profit_close_position", True),
-                )
+            if payload.get("stop_loss"):
+                try:
+                    result["rollback"] = self._emergency_close_entry(payload)
+                except Exception as rollback_exc:
+                    raise RuntimeError(
+                        f"Entry filled, SL/TP failed ({exc}), rollback failed: {rollback_exc}"
+                    ) from exc
+                raise RuntimeError(
+                    f"Entry filled but SL failed; position rolled back: {exc}"
+                ) from exc
+            logger.warning("TP failed for %s but SL is set — keeping position", payload.get("symbol"))
+            result["take_profit_error"] = str(exc)
         return result
 
     def _execute_partial_close(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.partial_close(payload["symbol"], float(payload["percentage"]))
+        sym = str(payload["symbol"])
+        result = self.partial_close(sym, float(payload["percentage"]))
+        if _position_contracts(self.fetch_position_for_symbol(sym)) <= 0:
+            self.cancel_exit_algos(sym, sl=True, tp=True)
+        return result

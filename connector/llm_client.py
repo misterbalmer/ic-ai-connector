@@ -50,8 +50,16 @@ class LlmError(Exception):
     pass
 
 
-def _extract_json(text: str) -> dict[str, Any]:
+def _strip_markdown_fences(text: str) -> str:
     text = text.strip()
+    fenced = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", text, re.DOTALL | re.IGNORECASE)
+    if fenced:
+        return fenced.group(1).strip()
+    return text
+
+
+def _extract_json(text: str) -> dict[str, Any]:
+    text = _strip_markdown_fences(text)
     if not text:
         raise LlmError("LLM response did not contain valid JSON")
     try:
